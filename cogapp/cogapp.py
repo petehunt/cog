@@ -16,6 +16,8 @@ import types
 from .whiteutils import commonPrefix, reindentBlock, whitePrefix
 from .utils import NumberedFileReader, Redirectable, change_dir, md5
 
+import jinja2
+
 __version__ = "3.4.0"
 
 usage = """\
@@ -133,35 +135,26 @@ class CogGenerator(Redirectable):
         if not intext:
             return ''
 
-        prologue = "import " + cog.cogmodulename + " as cog\n"
-        if self.options.sPrologue:
-            prologue += self.options.sPrologue + '\n'
-        code = compile(prologue + intext, str(fname), 'exec')
-
-        # Make sure the "cog" module has our state.
-        cog.cogmodule.msg = self.msg
-        cog.cogmodule.out = self.out
-        cog.cogmodule.outl = self.outl
-        cog.cogmodule.error = self.error
-
-        real_stdout = sys.stdout
-        if self.options.bPrintOutput:
-            sys.stdout = captured_stdout = io.StringIO()
-
         self.outstring = ''
         try:
-            eval(code, globals)
+            jinja_env = jinja2.Environment()
+            gs = jinja_env.make_globals(globals)
+            rendered = jinja2.Template.from_code(
+                jinja_env, jinja_env.compile(intext, filename=fname), gs
+            ).render()
+            lines = rendered.splitlines()
+            for line in lines:
+                self.outl(line)
         except CogError:
             raise
         except:
+            # TODO: fix this up.
             typ, err, tb = sys.exc_info()
             frames = (tuple(fr) for fr in traceback.extract_tb(tb.tb_next))
-            frames = find_cog_source(frames, prologue)
+            frames = find_cog_source(frames, "")
             msg = "".join(traceback.format_list(frames))
             msg += f"{typ.__name__}: {err}"
             raise CogUserException(msg)
-        finally:
-            sys.stdout = real_stdout
 
         if self.options.bPrintOutput:
             self.outstring = captured_stdout.getvalue()
@@ -225,9 +218,9 @@ class CogOptions:
         self.bEofCanBeEnd = False
         self.sSuffix = None
         self.bNewlines = False
-        self.sBeginSpec = '[[[cog'
-        self.sEndSpec = ']]]'
-        self.sEndOutput = '[[[end]]]'
+        self.sBeginSpec = '{% codegen start %}'
+        self.sEndSpec = '{% codegen output %}'
+        self.sEndOutput = '{% codegen end %}'
         self.sEncoding = "utf-8"
         self.verbosity = 2
         self.sPrologue = ''
